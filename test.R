@@ -1,116 +1,300 @@
-#############################################################
-##                                                         ##
-##   elastic.R                                             ##
-##                                                         ##
-##               Author: Benoit Four                       ##
-##                                                         ##
-##                                     Date: March 2018    ##
-##                                                         ##
-#############################################################
+####################################################################
+##                                                                ##
+##   elastic.R                                                    ##
+##                                                                ##
+##                                                                ##
+##                                                                ##
+##                                            Date: March 2018    ##
+##                                                                ##
+####################################################################
 
-# workspace cleanup
+####################################################################
+##################### DATA LOADING AND PREP ########################
+####################################################################
+
+
+####################### workspace cleanup###########################
 rm(list=ls())
 
-# libraries
+####################### libraries ##################################
 library(glmnet)
 library(caTools)
 library(caret)
 library(Metrics)
+library(data.table)
+library(dplyr)
+library(devtools)
+library(makedummies)
+library(ineq)
+#install.packages("devtools")
+#devtools::install_github("toshi-ara/makedummies")
 
-#Load data
+
+####################### Load data ##################################
+
 setwd("A:\\00_Personal\\Four_Benoit\\R\\POC-ElasticNet")
-data <- read.csv2("seve.csv",sep=",")
-BI <- subset(data, data$INC_MODEL_BI!=0)
+MAIN_DIR <- "//srvhfile1/ShareFiles/Actuarial/DD/Tech_Pricing/working_2018/sample_code"
+DATA_DIR <- "//srvhsas3/DD/temporary/tech_pricing/data_prep_rm_201801"
 
-##################### MAIN FUNCTIONS #############################
+####################### define scope ###############################
 
-###########CUT AND CAP FUNCTIONS #############
+TARGET_LOB = "AUTO" # AUTO, BIKE, MOPED
+TARGET_RES = "INC_MODEL_PD" # BI, PD, PA, PI, ODdrive, ODother, FBI, FPD, LE
 
-cap_inc <- function(data,amount){
-  data$INC <- as.numeric(data$INC)
-  data$INC <- pmin(amount,data$INC)
+###################### read data (time-consuming) ##################
+if(FALSE){
+  data_org <- fread(paste(DATA_DIR, "seve.csv", sep="/"), sep=",") %>%
+    dplyr:: filter(LOB == TARGET_LOB & VAL_Rand_Model != "Validation")
 }
 
-cut_inc <- function(data,amount){
-  data$INC <- as.numeric(data$INC)
-  data$INC <- pmin(amount,data$INC)
-  data <- subset(data, data$INC!=amount)
+data_org <- fread(paste(DATA_DIR, "seve.csv", sep="/"), sep=",") %>%
+  dplyr:: filter(LOB == TARGET_LOB & VAL_Rand_Model != "Validation")
+
+###################### data prep ##################################
+
+data <- mutate_(data_org, INC=TARGET_RES) #replace INC by INC_MODEL_PD then filter by INC > 0 to filter on PD cover
+data <- filter(data, INC > 0)
+source(paste(MAIN_DIR, "1_data_prep.R", sep="/"))
+summary(data)
+str(data)
+
+PD <- data
+
+#################### generate dummy variables ######################
+PD <- makedummies(PD, basal_level = FALSE)
+PD <- select_(PD, c('-starts_with("res")')) # delete strange variables 
+str(PD)
+
+#######################################################################
+########################## MAIN FUNCTIONS #############################
+#######################################################################
+
+
+################################ GINI ################################# 
+
+Gini <- function(observed, predicted){
+  n = length(observed)
+  i = 1:n
+  y = observed[order(predicted)]
+  
+  G = 1 / (n - 1) * (n + 1 - 2 * ( sum( (n + 1 - i) * y )  ) / sum(y) )
+  return(G)
 }
 
-########### 10 fold validation with random variable #############
 
-#We suppose the dataset is already filtered, cutted/capped
-predict_elnet <- function(dataf,alpha){
-  
-  l = nrow(dataf)
-  indice <- runif(l)*10 
-  indice <- trunc(indice)
-  dataf <- data.frame(dataf,indice)
-  dataf <- dataf[order(indice),]
-  #BI$indice <- NULL
-  dataf_pred=data.frame()
-    for (i in 0:9){
-  
-      dataf_train <- subset(dataf, dataf$indice!=i)
-      dataf_train_factors <- model.matrix(INC~PER_LicenseColor+PER_DriverClause+LOB+BEH_Usage,data=dataf_train) #turn qualitative variables into dummy variables
-      x <-as.matrix(data.frame(dataf_train$PER_InsAge,dataf_train$CLA_BM_Num,dataf_train_factors))
-      y=dataf_train$INC
-      y <- as.numeric(y)
-      fit = cv.glmnet(x,y,family="gaussian",alpha=0,intercept = FALSE)
-  
-      dataf_test <- subset(dataf, dataf$indice==i)
-      dataf_test_pred_factors <- model.matrix(INC~PER_LicenseColor+PER_DriverClause+LOB+BEH_Usage,data=dataf_test) #turn qualitative variables into dummy variables
-      x1 <-as.matrix(data.frame(dataf_test$PER_InsAge,dataf_test$CLA_BM_Num,dataf_test_pred_factors))
-      inc_pred = predict(fit,x1)
-      inc_pred = cbind(inc_pred,dataf_test$POL_NUM)
-      dataf_pred =rbind(dataf_pred,inc_pred)
-    }
+normalized_gini <- function(observed, predicted){
+  Gini(observed, predicted) / Gini(observed,observed)
+}  
 
-  dataf_real_inc = as.numeric(BI$INC)
-  dataf_real_pol_number = dataf$POL_NUM
-  dataf_pred =cbind(dataf_pred,dataf_real_inc,dataf_real_pol_number)
-  colnames(dataf_pred)[1] <- "BI_pred_inc"
-  colnames(dataf_pred)[2] <- "BI_pred_pol_number"
-  return(dataf_pred)
-}
+####################CUT AND CAP FUNCTIONS #############################
 
-#test
-BI <- subset(data, data$INC_MODEL_BI!=0)
-C = predict_elnet(BI,0.5)
-rmse(C[1],C[3])
+PD_test <- PD
+summary(PD_test$INC)
+A = filter(PD_test, INC < 1000000)
+summary(PD_test$INC)
+cap_PD = PD_test
+cap_PD$INC <- replace(cap_PD$INC, cap_PD$INC > 400000*1,400000*1)
 
 
-#################### TEST / VALIDATION PART #####################
-BI <- subset(data, data$INC_MODEL_BI!=0)
-l = nrow(BI)
+############################ CAP KPI ################################
+# Make sure there's no indice column before
+PD$indice <- NULL
+PD$indice1 <- NULL
+PD$indice.2 <- NULL
+#Random 10 cross validation
+l = nrow(PD)
 indice <- runif(l)*10 
 indice <- trunc(indice)
-BI <- data.frame(BI,indice)
-BI <- BI[order(indice),]
-#BI$indice <- NULL
+PD <- data.frame(PD,indice)
+PD <- PD[order(indice),]
+#Create discrepancy
+data_capped <- PD
+data_capped$INC <- replace(PD$INC, PD$INC > amount,amount)
+discrepancy = (PD$INC - data_capped$INC)/length(PD$INC)
 
-  BI_train <- subset(BI, BI$indice!=i)
-  BI_train_factors <- model.matrix(INC~PER_LicenseColor+PER_DriverClause+LOB+BEH_Usage,data=BI_train) #turn qualitative variables into dummy variables
-  x <-as.matrix(data.frame(BI_train$PER_InsAge,BI_train$CLA_BM_Num,BI_train_factors))
-  y=BI_train$INC
-  y <- as.numeric(y)
-  fit = cv.glmnet(x,y,family="gaussian",alpha=0,intercept = FALSE)
+#CAP Function 1: For 1 threshold return KPI indicators
+cap_predict_elnet <- function(PD,alpha_value,amount){
   
-  BI_test <- subset(BI, BI$indice==i)
-  BI_test_pred_factors <- model.matrix(INC~PER_LicenseColor+PER_DriverClause+LOB+BEH_Usage,data=BI_test) #turn qualitative variables into dummy variables
-  x1 <-as.matrix(data.frame(BI_test$PER_InsAge,BI_test$CLA_BM_Num,BI_test_pred_factors))
-  inc_pred = predict(fit,x1)
-  inc_pred = cbind(inc_pred,BI_test$POL_NUM)
-  BI_pred =rbind(BI_pred,inc_pred)
+  pred_inc=matrix()
+  pred_coeff=matrix()
+  
+  for (i in 0:9){
+    #Filtering on k fold + Capping on the amount
+    data_train <- subset(PD, PD$indice!=i)
+    data_train$INC <- replace(data_train$INC, data_train$INC > amount,amount)
+    R_VAR=data_train$INC
+    E_VAR <- as.matrix(data_train[,!(colnames(data_train) %in% c("RESPONSE","INC","indice","indice.1","indice.2"))])
+    
+    cv <- cv.glmnet(
+      x=E_VAR,
+      y=log(R_VAR),
+      family="gaussian",
+      alpha=alpha_value,
+      nfolds=10,
+      type.measure="deviance",
+      keep=TRUE
+    ) 
+    
+    data_test <- subset(PD, PD$indice==i)
+    data_test$INC <- NULL
+    E_PRED <- as.matrix(data_test[,!(colnames(data_test) %in% c("RESPONSE","INC","indice","indice.1","indice.2"))])
+    pred_coeff=rbind(pred_coeff,coef(cv))
+    pred_inc = rbind(pred_inc,exp(predict(cv,E_PRED)))
+    
+  }
+  
+  coeff <- pred_coeff
+  inc <- pred_inc[!is.na(pred_inc)]
+  rmse <- rmse(pred_inc[!is.na(pred_inc)]+discrepancy,PD$INC)
+  gini <- Gini(PD$INC,pred_inc[!is.na(pred_inc)])
+  ngini <- Gini(PD$INC, pred_inc[!is.na(pred_inc)]) / Gini(PD$INC,PD$INC) 
+  newList <- list("coeff" = coeff,"inc" = inc, "rmse" = rmse, "gini" = gini, "ngini" = ngini)
+  return(newList)
+}
+
+#Test
+l = cap_predict_elnet(PD,0,2000000)
+l$coeff
+l$gini
+l$ngini
+
+#CAP Function 2: Loop on threshold list, return list of KPI parameters to be plooted
+cap_loop_elnet <- function(PD,alpha_value){
+  list_rmse = list()
+  list_gini = list()
+  list_ngini = list()
+  for (i in list(4,8,12,13,14,15,16,17,18,19,20,21,22,23,25,30,40,80,120)){ 
+    p = cap_predict_elnet(PD,alpha_value,100000*i)
+    list_rmse = rbind(list_rmse,p$rmse)
+    list_gini = rbind(list_gini,p$gini)
+    list_ngini = rbind(list_ngini,p$ngini)
+  }
+  result <- list("rmseL" = list_rmse,"giniL" = list_gini, "nginiL" = list_ngini)
+  return(result)
+}  
+
+#Test CAP for alpha = 1
+PD_cap_alpha1 = cap_loop_elnet(PD,1)
+PD_cap_alpha1
+h1 = as.data.frame(PD_cap_alpha1)
+h1$rmseL <- vapply(h1$rmseL, paste, collapse = ", ", character(1L))
+h1$giniL <- vapply(h1$giniL, paste, collapse = ", ", character(1L))
+h1$nginiL <- vapply(h1$nginiL, paste, collapse = ", ", character(1L))
+write.csv2(h1,file = "PD_cap_alpha1")
+
+#Test CAP for alpha = 0
+PD_cap_alpha0 = cap_loop_elnet(PD,0)
+PD_cap_alpha0
+h0 = as.data.frame(PD_cap_alpha0)
+h0$rmseL <- vapply(h0$rmseL, paste, collapse = ", ", character(1L))
+h0$giniL <- vapply(h0$giniL, paste, collapse = ", ", character(1L))
+h0$nginiL <- vapply(h0$nginiL, paste, collapse = ", ", character(1L))
+write.csv2(h0,file = "PD_cap_alpha0")
 
 
-BI_real_inc = as.numeric(BI$INC)
-BI_real_pol_number = BI$POL_NUM
-BI_pred =cbind(BI_pred,BI_real_inc,BI_real_pol_number)
-colnames(BI_pred)[1] <- "BI_pred_inc"
-colnames(BI_pred)[2] <- "BI_pred_pol_number"
-rmse(BI_pred[1],BI_pred[3])
+#Test CAP for alpha = 0.5
+PD_cap_alpha05 = cap_loop_elnet(PD,0.5)
+PD_cap_alpha05
+d = as.data.frame(PD_cap_alpha05)
+d$rmseL <- vapply(d$rmseL, paste, collapse = ", ", character(1L))
+d$giniL <- vapply(d$giniL, paste, collapse = ", ", character(1L))
+d$nginiL <- vapply(d$nginiL, paste, collapse = ", ", character(1L))
+write.csv2(d,file = "PD_cap_alpha05")
 
-BI <- subset(BI, BI$INC_MODEL_BI!=0)
 
-BI_train_factors <- model.matrix(INC~PER_LicenseColor+PER_DriverClause+LOB+BEH_Usage,data=BI) #turn qualitative variables into dummy variables
+############################# CUT KPI #################################
+#CUT Function 1: For 1 threshold return KPI indicators
+cut_predict_elnet <- function(PD,alpha_value,amount){
+  
+  pred_inc=matrix()
+  pred_coeff=matrix()
+  diff=matrix()
+  diff=as.matrix(filter(PD, PD$INC > amount)$INC)
+  additionnal_term = (sum(diff[!is.na(diff)])/nrow(PD))
+  
+  for (i in 0:9){
+    #Filtering on k fold + Capping on the amount
+    data_train <- subset(PD, PD$indice!=i)
+    data_train <- filter(data_train, INC < amount)
+    R_VAR=data_train$INC
+    E_VAR <- as.matrix(data_train[,!(colnames(data_train) %in% c("RESPONSE","INC","indice","indice.1","indice.2"))])
+    
+    cv <- cv.glmnet(
+      x=E_VAR,
+      y=log(R_VAR),
+      family="gaussian",
+      alpha=alpha_value,
+      nfolds=10,
+      type.measure="deviance",
+      keep=TRUE
+    ) 
+    
+    data_test <- subset(PD, PD$indice==i)
+    data_test$INC <- NULL
+    E_PRED <- as.matrix(data_test[,!(colnames(data_test) %in% c("RESPONSE","INC","indice","indice.1","indice.2"))])
+    pred_coeff=rbind(pred_coeff,coef(cv))
+    pred_inc = rbind(pred_inc,exp(predict(cv,E_PRED)))
+    
+  }
+  
+  coeff <- pred_coeff
+  inc <- pred_inc[!is.na(pred_inc)]
+  rmse <- rmse(pred_inc[!is.na(pred_inc)]+additionnal_term,PD$INC)
+  gini <- Gini(PD$INC,pred_inc[!is.na(pred_inc)])
+  ngini <- Gini(PD$INC, pred_inc[!is.na(pred_inc)]) / Gini(PD$INC,PD$INC) 
+  newList <- list("coeff" = coeff,"inc" = inc, "rmse" = rmse, "gini" = gini, "ngini" = ngini)
+  return(newList)
+}
+
+#Test 
+PD_cut_test = cut_predict_elnet(PD,1,2000000)
+PD_cut_test$coeff
+PD_cut_test$gini
+PD_cut_test$rmse
+
+#CUT Function 2: Loop on threshold list, return list of KPI parameters to be plooted
+cut_loop_elnet <- function(PD,alpha_value){
+  list_rmse = list()
+  list_gini = list()
+  list_ngini = list()
+  for (i in list(4,8,12,13,14,15,16,17,18,19,20,21,22,23,25,30,40,80,120)){ 
+    p = cut_predict_elnet(PD,alpha_value,100000*i)
+    list_rmse = rbind(list_rmse,p$rmse)
+    list_gini = rbind(list_gini,p$gini)
+    list_ngini = rbind(list_ngini,p$ngini)
+  }
+  result <- list("rmseL" = list_rmse,"giniL" = list_gini, "nginiL" = list_ngini)
+  return(result)
+} 
+
+#Test CAP for alpha = 1
+PD_cut_alpha1 = cut_loop_elnet(PD,1)
+PD_cut_alpha1
+g1 = as.data.frame(PD_cut_alpha1)
+g1$rmseL <- vapply(g1$rmseL, paste, collapse = ", ", character(1L))
+g1$giniL <- vapply(g1$giniL, paste, collapse = ", ", character(1L))
+g1$nginiL <- vapply(g1$nginiL, paste, collapse = ", ", character(1L))
+write.csv2(g1,file = "PD_cut_alpha1")
+
+#Test CAP for alpha = 0
+PD_cut_alpha0 = cut_loop_elnet(PD,0)
+PD_cut_alpha0
+g0 = as.data.frame(PD_cut_alpha0)
+g0$rmseL <- vapply(g0$rmseL, paste, collapse = ", ", character(1L))
+g0$giniL <- vapply(g0$giniL, paste, collapse = ", ", character(1L))
+g0$nginiL <- vapply(g0$nginiL, paste, collapse = ", ", character(1L))
+write.csv2(g0,file = "PD_cut_alpha0")
+
+#Test CAP for alpha = 0.5
+PD_cut_alpha05 = cut_loop_elnet(PD,0.5)
+PD_cut_alpha05
+g05 = as.data.frame(PD_cut_alpha05)
+g05$rmseL <- vapply(g05$rmseL, paste, collapse = ", ", character(1L))
+g05$giniL <- vapply(g05$giniL, paste, collapse = ", ", character(1L))
+g05$nginiL <- vapply(g05$nginiL, paste, collapse = ", ", character(1L))
+write.csv2(g05,file = "PD_cut_alpha05")
+
+
+####################### TEST / VALIDATION PART ########################
+
+
