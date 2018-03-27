@@ -1,54 +1,55 @@
 ### feature selection
 data <- select(data,
-  "INC",
-  "VAL_Year",
-  "VAL_Semester",
-  "PER_LicenseColor",
-  "PER_InsGender",
-  "PER_InsAge",
-  "PER_AgeClause",
-  "PER_DriverClause",
-  "CLA_BM_Num",
-  "CLA_BM_67new",
-  "CLA_BM_Swap",
-  "CLA_PunishmentPeriod",
-  "CLA_LAST_EVT_MAIN4",
-  "CLA_HIST_EVT_MAIN4",
-  "BEH_Usage",
-  "BEH_Mileage",
-  "VEH_Type",
-  "VEH_Age",
-  "VEH_LogPrice_MI",
-  "VEH_LatestClassBI",
-  "VEH_LatestClassPD",
-  "VEH_LatestClassPA",
-  "VEH_LatestClassOD",
-  "VEH_EngineCapacity2",
-  "VEH_Torque",
-  "VEH_Power",
-  "VEH_Weight",
-  "VEH_PowerWeight",
-  "VEH_YealyAvgOfDrivenDistance",
-  "VEH_Hybrid",
-  "VEH_ManufactureCountry",
-  "POL_RenewalTimes",
-  "POL_Formula",
-  "POL_Deduct",
-  "POL_Option_PE",
-  "POL_Option_FB",
-  "POL_Option_FamPlus",
-  "POL_Option_LadyPlus",
-  "POL_Option_PetPlus",
-  "POL_Option_EQ",
-  "POL_Option_PDexcess",
-  "POL_Limit_PD",
-  "POL_Limit_PA",
-  "POL_Limit_PI",
-  "POL_Limit_LE",
-  "POL_MultiCont",
-  "POL_InsurerType_B4ADJ",
-  "REG_Region",
-  "REG_RuralUrban"
+               "INC",
+               "VAL_Year",
+               "VAL_Semester",
+               "PER_LicenseColor",
+               "PER_InsGender",
+               "PER_InsAge",
+               "PER_AgeClause",
+               "PER_DriverClause",
+               "CLA_BM_Num",
+               "CLA_BM_67new",
+               "CLA_BM_Swap",
+               "CLA_PunishmentPeriod",
+               "CLA_LAST_EVT_MAIN4",
+               "CLA_HIST_EVT_MAIN4",
+               "BEH_Usage",
+               "BEH_Mileage",
+               "VEH_Type",
+               "VEH_Age",
+               "VEH_LogPrice_MI",
+               "VEH_LatestClassBI",
+               "VEH_LatestClassPD",
+               "VEH_LatestClassPA",
+               "VEH_LatestClassOD",
+               "VEH_EngineCapacity2",
+               "VEH_Torque",
+               "VEH_Power",
+               "VEH_Weight",
+               "VEH_PowerWeight",
+               "VEH_Odometer",
+               "VEH_YealyAvgOfDrivenDistance",
+               "VEH_Hybrid",
+               "VEH_ManufactureCountry",
+               "POL_RenewalTimes",
+               "POL_Formula",
+               "POL_Deduct",
+               "POL_Option_PE",
+               "POL_Option_FB",
+               "POL_Option_FamPlus",
+               "POL_Option_LadyPlus",
+               "POL_Option_PetPlus",
+               "POL_Option_EQ",
+               "POL_Option_PDexcess",
+               "POL_Limit_PD",
+               "POL_Limit_PA",
+               "POL_Limit_PI",
+               "POL_Limit_LE",
+               "POL_MultiCont",
+               "POL_InsurerType_B4ADJ",
+               "REG_Region",
+               "REG_RuralUrban"
 )
 
 
@@ -164,8 +165,12 @@ data <- mutate(
   POL_Limit_LE = case_when(
     POL_Limit_LE == 3000000 ~ "3M",
     TRUE ~ "NoLE"
-  )
+  ),
   
+  VEH_Odometer =  case_when(
+    is.na(VEH_Odometer) ~ as.integer(median(VEH_Odometer, na.rm=TRUE)),
+    TRUE ~ VEH_Odometer
+  )
   
 )
 
@@ -177,5 +182,4 @@ data <- mutate_if(data, sapply(data, is.character), as.factor)
 
 
 ### modify class
-data  <- transform(data, VAL_Year = as.factor(VAL_Year)
-)
+data  <- transform(data, VAL_Year = as.factor(VAL_Year))

@@ -20,8 +20,7 @@ if(FALSE){
     dplyr:: filter(LOB == TARGET_LOB & VAL_Rand_Model != "Validation")
 }
 
-data_org <- fread(paste(DATA_DIR, "seve.csv", sep="/"), sep=",") %>%
-  dplyr:: filter(LOB == TARGET_LOB & VAL_Rand_Model != "Validation")
+
 
 ### data prep
 data <- mutate_(data_org, INC=TARGET_RES)
